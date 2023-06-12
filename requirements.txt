@@ -1,0 +1,6 @@
+django
+djangorestframework
+curveengine
+flask
+django-rest-swagger
+drf-yasg
