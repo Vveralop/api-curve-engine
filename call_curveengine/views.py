@@ -5,9 +5,23 @@ from rest_framework.views import APIView
 from rest_framework.serializers import Serializer
 from rest_framework import status
 from curveengine import CurveEngine
+import curveengine as ce
 from datetime import datetime
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+import ORE
+import requests
+import json
+
+# Llamada para obtener curva dados ciertos parámetros.
+def to_discount(paramsJson):
+    # Cambiar esto por llamada a API Connect
+    url='http://localhost:4000/api/v1/funding/toDiscount/'+ json.dumps(paramsJson)
+    data= requests.get(url)
+    if data.status_code == 200:
+        return data.json()
+    else:
+        return []
 
 def generate_json(code, msg, data):
     response_data = {}
@@ -89,7 +103,7 @@ class api_bootstrap(APIView):
         try:
             #version 1.1.0
             #cm = CurveEngine(request.data)
-            #version 1.1.1
+            #version 1.1.2
             cm = CurveEngine(data=request.data, curves={}, indexes={})
         except Exception as e:
             if (str(e)=='Invalid configuration'):
@@ -117,7 +131,7 @@ class api_bootstrap(APIView):
                 error = str(e)
             return Response(generate_json(code, error, ''), status=code)
 
-        resp = {}
+        curvas = []
         for curve_name, curve in cm.curves.items():
             data_curve = []
             for item in curve.nodes():
@@ -125,6 +139,45 @@ class api_bootstrap(APIView):
                                  'date': str(item[0].year())+'-'+str(item[0].month()).rjust(2, '0')+'-'+str(item[0].dayOfMonth()).rjust(2, '0'), 
                                  'value': item[1]
                                 })
-            resp[curve_name] = data_curve
+            curvas.append({ 'curveName': curve_name, 'nodes': data_curve })
+            print(curvas)
             
-        return Response(generate_json(200, 'OK', resp))
+        return Response(generate_json(200, 'OK', curvas))
+    
+class api_discount(APIView):
+    # Start validation and return of curves from JSON required.
+    @swagger_auto_schema(
+        request_body=post_schema,
+        responses=post_response,
+        operation_description="Send JSON with data with the discount curves."
+    )
+    def post(self, request, format=None):
+        serializer_class=Serializer
+        #logging.warning(request.data)
+        req = request.data
+        #llamada 
+        call_to_discount = to_discount(req)
+        if (call_to_discount['code'] == 200):
+            curve = call_to_discount['data'][0]
+            dates = [ce.parseDate(node['date']) for node in curve['nodes']]
+            values = [node['value'] for node in curve['nodes']]
+            # se setea la fecha global para evitar errores de calculo
+            ORE.Settings.instance().evaluationDate = dates[0]
+            #Actual360 va fijo
+            oreCurve = ORE.DiscountCurve(dates, values, ce.parseDayCounter('Actual360'))
+            #se interpola y se estructura la respuesta
+            responseDiscounts = []
+            if ('dates' not in req):
+                return Response(generate_json(200, 'No ha proporcionado dates. Se devuelve la curva asociada a los otros parámetros.', curve['nodes']))
+            else:
+                for requestedDate in req['dates']:
+                    parsedDate = ce.parseDate(requestedDate) 
+                    df = oreCurve.discount(parsedDate)
+                    responseDiscounts.append({'date': requestedDate, 'value': df})
+                #Valida que dates venga sino envía la curva
+                if (len(req['dates'])==0):
+                    return Response(generate_json(200, 'OK', curve['nodes']))
+                else:
+                    return Response(generate_json(200, 'OK', responseDiscounts))
+        else:
+            return Response(generate_json(call_to_discount['code'], call_to_discount['message'], ''))

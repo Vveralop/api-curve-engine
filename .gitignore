@@ -48,3 +48,22 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+
+### Django ###
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+settings.ini
+my_settings.py
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
