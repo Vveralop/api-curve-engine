@@ -14,9 +14,9 @@ import requests
 import json
 
 # Llamada para obtener curva dados ciertos parámetros.
-def to_discount(paramsJson):
+def get_curves(paramsJson):
     # Cambiar esto por llamada a API Connect
-    url='http://localhost:4000/api/v1/funding/toDiscount/'+ json.dumps(paramsJson)
+    url='http://localhost:4000/api/v1/funding/curve/'+ json.dumps(paramsJson)
     data= requests.get(url)
     if data.status_code == 200:
         return data.json()
@@ -140,7 +140,6 @@ class api_bootstrap(APIView):
                                  'value': item[1]
                                 })
             curvas.append({ 'curveName': curve_name, 'nodes': data_curve })
-            print(curvas)
             
         return Response(generate_json(200, 'OK', curvas))
     
@@ -156,7 +155,7 @@ class api_discount(APIView):
         #logging.warning(request.data)
         req = request.data
         #llamada 
-        call_to_discount = to_discount(req)
+        call_to_discount = get_curves(req)
         if (call_to_discount['code'] == 200):
             curve = call_to_discount['data'][0]
             dates = [ce.parseDate(node['date']) for node in curve['nodes']]
@@ -168,7 +167,7 @@ class api_discount(APIView):
             #se interpola y se estructura la respuesta
             responseDiscounts = []
             if ('dates' not in req):
-                return Response(generate_json(200, 'No ha proporcionado dates. Se devuelve la curva asociada a los otros parámetros.', curve['nodes']))
+                return Response(generate_json(200, 'You have not provided dates. The curve associated with the other delivered parameters is returned.', curve['nodes']))
             else:
                 for requestedDate in req['dates']:
                     parsedDate = ce.parseDate(requestedDate) 
@@ -179,5 +178,44 @@ class api_discount(APIView):
                     return Response(generate_json(200, 'OK', curve['nodes']))
                 else:
                     return Response(generate_json(200, 'OK', responseDiscounts))
+        else:
+            return Response(generate_json(call_to_discount['code'], call_to_discount['message'], ''))
+
+class api_forward_rates(APIView):
+    # Start validation and return of curves from JSON required.
+    @swagger_auto_schema(
+        request_body=post_schema,
+        responses=post_response,
+        operation_description="Send JSON with data with the forward rates."
+    )
+    def post(self, request, format=None):
+        serializer_class=Serializer
+        #logging.warning(request.data)
+        req = request.data
+        #llamada 
+        call_to_discount = get_curves(req)
+        if (call_to_discount['code'] == 200):
+            curve = call_to_discount['data'][0]
+            dates = [ce.parseDate(node['date']) for node in curve['nodes']]
+            values = [node['value'] for node in curve['nodes']]
+            # se setea la fecha global para evitar errores de calculo
+            ORE.Settings.instance().evaluationDate = dates[0]
+            #Actual360 va fijo
+            oreCurve = ORE.DiscountCurve(dates, values, ce.parseDayCounter('Actual360'))
+            #se interpola y se estructura la respuesta
+            responseDiscounts = []
+            if ('dates' not in req):
+                print(req)
+                return Response(generate_json(200, 'You have not provided dates. The curve associated with the other delivered parameters is returned.', { "startDate": "", "endDate":"", "value":curve['nodes']}))
+            else:
+                for requestedDate in req['dates']:
+                    startDate = ce.parseDate(requestedDate['startDate'])
+                    endDate = ce.parseDate(requestedDate['endDate'])      
+                    fwdRate = oreCurve.forwardRate(startDate, endDate, ce.parseDayCounter(req['dayCounter']), ce.parseCompounding(req['compounding'])).rate()
+                    #Valida que dates venga sino envía la curva
+                    if (len(req['dates'])==0):
+                        return Response(generate_json(200, 'Sin ', curve['nodes']))
+                    else:
+                        return Response(generate_json(200, 'OK', { "startDate": requestedDate['startDate'], "endDate":requestedDate['endDate'], "value":fwdRate}))
         else:
             return Response(generate_json(call_to_discount['code'], call_to_discount['message'], ''))
