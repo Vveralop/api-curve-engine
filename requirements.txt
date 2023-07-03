@@ -4,3 +4,4 @@ curveengine
 flask
 django-rest-swagger
 drf-yasg
+atlas-finance-noad
